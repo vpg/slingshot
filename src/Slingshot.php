@@ -1,16 +1,11 @@
 <?php
 namespace vpg\slingshot;
-require_once 'vendor/autoload.php';
-
-use Monolog;
 
 /**
  * ES Migration tool based on Scann/Scroll + bulk
  *
  * @todo
- *  - Add log
- *  - Support differents hosts (source and target) to allow index copy from one srv to another
- *  - Add custom- Support differents hosts (source and target) to allow index copy from one srv to another
+ *  - Add log using monolog
  *
  * @namespace vpg\slingshot
  */
@@ -25,7 +20,7 @@ class Slingshot
     /**
      * Instanciate the ElasticSearch Migration Service
      *
-     * @param array $esCnfHash     Elastic Search connection config
+     * @param array $hostsConfHash Elastic Search connection config
      *              e.g. : [
      *                  'from' => '192.168.100.100:9200',
      *                  'to'   => '192.168.100.100:9200'
@@ -41,15 +36,19 @@ class Slingshot
      *
      * @return void
      */
-    public function __construct($esCnfHash, $migrationHash) {
+    public function __construct($hostsConfHash, $migrationHash)
+    {
         if (!$this->isMigrationConfValid($migrationHash)) {
             throw new \Exception('Wrong migrationHash paramater');
         }
+        if (!$this->isHostsConfValid($hostsConfHash)) {
+            throw new \Exception('Wrong hosts conf paramater');
+        }
         $this->migrationHash = $migrationHash;
-        $this->ESClientSource = new \Elasticsearch\Client(['hosts' => [$esCnfHash['from']]]);
+        $this->ESClientSource = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['from']]]);
         $this->ESClientTarget = &$this->ESClientSource;
-        if ($esCnfHash['from'] != $esCnfHash['to']) {
-            $this->ESClientTarget = new \Elasticsearch\Client(['hosts' => [$esCnfHash['to']]]);
+        if ( !empty($hostsConfHash['to']) &&  $hostsConfHash['from'] != $hostsConfHash['to']) {
+            $this->ESClientTarget = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['to']]]);
         }
     }
 
@@ -66,7 +65,7 @@ class Slingshot
      *
      * @return void
      */
-    public function migrate(array $searchQueryHash = [], $convertDocCallBack = null) 
+    public function migrate(array $searchQueryHash = [], $convertDocCallBack = null)
     {
         $this->searchQueryHash = $searchQueryHash;
         if (!is_callable($convertDocCallBack)) {
@@ -76,52 +75,88 @@ class Slingshot
         $this->processDocumentsMigration();
     }
 
+    /**
+     * Processes the migration using scan & scroll search
+     * Applies the given callback func on each document
+     * Saves document by batch using bulk API
+     *
+     * @todo factorize
+     *
+     * @return void
+     */
     private function processDocumentsMigration()
     {
-        $searchHashBase = [
-            "search_type" => "scan",
-            "scroll" => "30s",
-            "size" => 1000,
-        ];
-        $searchHash = array_merge($searchHashBase, $this->migrationHash['from']);
-        if ($this->searchQueryHash) {
-            $searchHash['body']['query'] = $this->searchQueryHash;
-        }
-        $docs = $this->ESClientSource->search($searchHash);
-        $scroll_id = $docs['_scroll_id'];
+        $scanQueryHash = $this->buildScanQueryHash();
+        $searchResultHash = $this->ESClientSource->search($scanQueryHash);
+        $totalDocNb = $searchResultHash['hits']['total'];
+        $scrollId = $searchResultHash['_scroll_id'];
 
         $iDoc = 0;
         $bulkHash = $this->migrationHash['to'];
+        $bulkAction = $this->migrationHash['bulk']['action'];
+        $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
         while (true) {
             $response = $this->ESClientSource->scroll(
                 array(
-                    "scroll_id" => $scroll_id,
+                    "scroll_id" => $scrollId,
                     "scroll" => "30s"
                 )
             );
             $docNb = count($response['hits']['hits']);
-            if ($docNb > 0) {
-                foreach ($response['hits']['hits'] as $hitHash) {
-                    $iDoc++;
-                    $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
-                    $bulkHash['body'][] = [
-                        $this->migrationHash['bulk']['action'] => [ '_id' => $docHash['_id']]
-                    ];
-                    $bulkHash['body'][] = $docHash;
-                    if (!($iDoc % 10000)) {
-                        echo "Bulk index batch of 10000 docs\n";
-                        $r = $this->ESClientTarget->bulk($bulkHash);
-                        $bulkHash = $this->migrationHash['to'];
-                    }
-                }
-                // Get new scroll_id
-                $scroll_id = $response['_scroll_id'];
-            } else {
+            // If there is nothing to process anymore
+            if ($docNb <= 0) {
                 break;
             }
+            foreach ($response['hits']['hits'] as $hitHash) {
+                $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
+                $bulkHash['body'][] = [
+                    $bulkAction => [ '_id' => $docHash['_id']]
+                    ];
+                $bulkHash['body'][] = $docHash;
+                $iDoc++;
+                // Bulk index the batch size doc or the remaining doc
+                if ( !($iDoc % $bulkBatchSize) || !($totalDocNb-$iDoc)) {
+                    echo "\nBulk " . (count($bulkHash['body'])/2);
+                    $r = $this->ESClientTarget->bulk($bulkHash);
+                    $bulkHash = $this->migrationHash['to'];
+                }
+            }
+            // Get new scroll id
+            $scrollId = $response['_scroll_id'];
         }
     }
 
+
+    /**
+     * Builds scann search hash using the given migrationHash and searchQueryHash
+     * Allows to averride scroll time and scroll size params
+     *
+     * @return array elastic search query
+     */
+    private function buildScanQueryHash()
+    {
+        $searchBaseHash = [
+            "search_type" => "scan",
+            ];
+        $searchDefaultHash = [
+            "scroll" => "30s",
+            "size" => 1000,
+            ];
+        $searchHash = $searchBaseHash + $this->migrationHash['from'];
+        $searchHash = array_merge($searchDefaultHash, $searchHash);
+        if ($this->searchQueryHash) {
+            $searchHash['body']['query'] = $this->searchQueryHash;
+        }
+        return $searchHash;
+    }
+
+    /**
+     * Validates the given migration conf
+     *
+     * @param array $migrationHash index migration informations
+     *
+     * @return bool true if the migration conf is usable
+     */
     private function isMigrationConfValid($migrationHash)
     {
         if ( empty($migrationHash['from']['index'])
@@ -134,4 +169,20 @@ class Slingshot
         return true;
     }
 
+    /**
+     * Validates the given elastic hosts conf
+     *
+     * @todo improve testing
+     *
+     * @param array $esConfHash index migration informations
+     *
+     * @return bool true if the migration conf is usable
+     */
+    private function isHostsConfValid($hostsConfHash)
+    {
+        if ( empty($hostsConfHash['from'])) {
+            return false;
+        }
+        return true;
+    }
 }
