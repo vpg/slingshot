@@ -6,7 +6,7 @@
     "repositories": [
         {
             "type": "vcs",
-            "url": "/home/jbourgeais/www/slingshot"
+            "url": "https://github.com/vpg/slingshot"
         }
     ],
     "require": {
