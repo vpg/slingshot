@@ -1,0 +1,15 @@
+{
+    "name" : "Slingshot Example",
+    "description" : "ES Migration tool based on Scann/Scroll + bulk",
+    "type" : "project",
+    "license" : "proprietary",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "/home/jbourgeais/www/slingshot"
+        }
+    ],
+    "require": {
+        "vpg/slingshot": "dev-master"
+    }
+}
