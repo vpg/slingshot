@@ -1,0 +1,17 @@
+#Composer lock file
+composer.lock
+
+#Third parties librairies
+vendor/
+
+#Config files for IntelliJ IDEA IDE
+.idea/
+*.iml
+
+#OSX files
+.DS_Store
+._.DS_Store
+
+#vim
+*.swp
+*.swo
