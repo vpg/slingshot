@@ -42,7 +42,7 @@ class Slingshot
      * @return void
      */
     public function __construct($esCnfHash, $migrationHash) {
-        if ($this->isMigrationConfValid($migrationHash)) {
+        if (!$this->isMigrationConfValid($migrationHash)) {
             throw new \Exception('Wrong migrationHash paramater');
         }
         $this->migrationHash = $migrationHash;
