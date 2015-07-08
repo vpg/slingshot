@@ -46,10 +46,10 @@ class Slingshot
             throw new \Exception('Wrong migrationHash paramater');
         }
         $this->migrationHash = $migrationHash;
-        $this->ESClientSource = new \Elasticsearch\Client(['hosts' => [$esCnfHash['from']]);
+        $this->ESClientSource = new \Elasticsearch\Client(['hosts' => [$esCnfHash['from']]]);
         $this->ESClientTarget = &$this->ESClientSource;
         if ($esCnfHash['from'] != $esCnfHash['to']) {
-            $this->ESClientTarget = new \Elasticsearch\Client(['hosts' => [$esCnfHash['to']]);
+            $this->ESClientTarget = new \Elasticsearch\Client(['hosts' => [$esCnfHash['to']]]);
         }
     }
 
