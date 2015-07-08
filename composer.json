@@ -1,5 +1,5 @@
 {
-    "name" : "vpg/Slingshot",
+    "name" : "vpg/slingshot",
     "description" : "ES Migration tool based on Scann/Scroll + bulk",
     "license" : "proprietary",
     "require" : {
