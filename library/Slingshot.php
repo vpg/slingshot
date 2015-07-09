@@ -83,33 +83,34 @@ class Slingshot
      */
     private function processMappingChanges()
     {
-        if (!empty($this->migrationHash['mappings']) && is_array($this->migrationHash['mappings'])) {
-            // fetch current mapping for FROM index/type
-            $currentMapping = $this->ESClientSource->indices()->getMapping($this->migrationHash['from']);
-            if (empty($currentMapping
-                        [$this->migrationHash['from']['index']]
-                        ['mappings']
-                        [$this->migrationHash['from']['type']])
-               ) {
-                // if empty initialize mapping
-                $newMappingProperties = $this->migrationHash['mappings'];
-            } else {
-                // replace current mapping properties with new mapping properties
-                $newMappingProperties = array_replace_recursive(
-                                $currentMapping[$this->migrationHash['from']['index']]['mappings'][$this->migrationHash['from']['type']],
-                                $this->migrationHash['mappings']);
-            }
-
-            $newMapping = array(
-                'index' => $this->migrationHash['to']['index'],
-                'type' =>  $this->migrationHash['to']['type'],
-                'body' => array($this->migrationHash['to']['type'] => $newMappingProperties)
-            );
-            $response = $this->ESClientTarget->indices()->putMapping($newMapping);
-            if(!empty($response['acknowledged'])) {
-                echo sprintf("Mapping succesfully changed for %s/%s", $this->migrationHash['to']['index'], $this->migrationHash['to']['type']).PHP_EOL;
-            };
+        if (empty($this->migrationHash['mappings']) || !is_array($this->migrationHash['mappings'])) {
+            return false;
         }
+        // fetch current mapping for FROM index/type
+        $currentMappingHash = $this->ESClientSource->indices()->getMapping($this->migrationHash['from']);
+        if (empty($currentMappingHash
+                    [$this->migrationHash['from']['index']]
+                    ['mappings']
+                    [$this->migrationHash['from']['type']])
+           ) {
+            // if empty initialize mapping
+            $newMappingPropertiesHash = $this->migrationHash['mappings'];
+        } else {
+            // replace current mapping properties with new mapping properties
+            $newMappingPropertiesHash = array_replace_recursive(
+                            $currentMappingHash[$this->migrationHash['from']['index']]['mappings'][$this->migrationHash['from']['type']],
+                            $this->migrationHash['mappings']);
+        }
+
+        $newMappingHash = array(
+            'index' => $this->migrationHash['to']['index'],
+            'type' =>  $this->migrationHash['to']['type'],
+            'body' => array($this->migrationHash['to']['type'] => $newMappingPropertiesHash)
+        );
+        $responseHash = $this->ESClientTarget->indices()->putMapping($newMappingHash);
+        if(!empty($responseHash['acknowledged'])) {
+            echo sprintf("Mapping succesfully changed for %s/%s", $this->migrationHash['to']['index'], $this->migrationHash['to']['type']).PHP_EOL;
+        };
     }
 
     /**
