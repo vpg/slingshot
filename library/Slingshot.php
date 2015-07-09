@@ -110,7 +110,7 @@ class Slingshot
             foreach ($response['hits']['hits'] as $hitHash) {
                 $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
                 $bulkHash['body'][] = [
-                    $bulkAction => [ '_id' => $docHash['_id']]
+                    $bulkAction => [ '_id' => $hitHash['_id']]
                     ];
                 $bulkHash['body'][] = $docHash;
                 $iDoc++;
