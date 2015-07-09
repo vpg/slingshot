@@ -72,7 +72,45 @@ class Slingshot
             throw new \Exception('Wrong callback function');
         }
         $this->convertDocCallBack = $convertDocCallBack;
+        $this->processMappingChanges();
         $this->processDocumentsMigration();
+    }
+
+    /**
+     * Processes the mapping changes if needed
+     *
+     * @return void
+     */
+    private function processMappingChanges()
+    {
+        if (empty($this->migrationHash['mappings']) || !is_array($this->migrationHash['mappings'])) {
+            return false;
+        }
+        // fetch current mapping for FROM index/type
+        $currentMappingHash = $this->ESClientSource->indices()->getMapping($this->migrationHash['from']);
+        if (empty($currentMappingHash
+                    [$this->migrationHash['from']['index']]
+                    ['mappings']
+                    [$this->migrationHash['from']['type']])
+           ) {
+            // if empty initialize mapping
+            $newMappingPropertiesHash = $this->migrationHash['mappings'];
+        } else {
+            // replace current mapping properties with new mapping properties
+            $newMappingPropertiesHash = array_replace_recursive(
+                            $currentMappingHash[$this->migrationHash['from']['index']]['mappings'][$this->migrationHash['from']['type']],
+                            $this->migrationHash['mappings']);
+        }
+
+        $newMappingHash = array(
+            'index' => $this->migrationHash['to']['index'],
+            'type' =>  $this->migrationHash['to']['type'],
+            'body' => array($this->migrationHash['to']['type'] => $newMappingPropertiesHash)
+        );
+        $responseHash = $this->ESClientTarget->indices()->putMapping($newMappingHash);
+        if(!empty($responseHash['acknowledged'])) {
+            echo sprintf("Mapping succesfully changed for %s/%s", $this->migrationHash['to']['index'], $this->migrationHash['to']['type']).PHP_EOL;
+        };
     }
 
     /**
@@ -116,7 +154,7 @@ class Slingshot
                 $iDoc++;
                 // Bulk index the batch size doc or the remaining doc
                 if ( !($iDoc % $bulkBatchSize) || !($totalDocNb-$iDoc)) {
-                    echo "\nBulk " . (count($bulkHash['body'])/2);
+                    echo PHP_EOL . "Bulk " . (count($bulkHash['body'])/2) . PHP_EOL;
                     $r = $this->ESClientTarget->bulk($bulkHash);
                     $bulkHash = $this->migrationHash['to'];
                 }
