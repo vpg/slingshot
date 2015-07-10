@@ -96,7 +96,7 @@ class Slingshot
         // Stats
         $endsAt = microtime(true);
         $execTime = round(($endsAt - $startsAt)/60,3);
-        $this->logger->addInfo("Migration ends at {now} in {time}s using {mem}Mo max",
+        $this->logger->addInfo("Migration ends at {now} in {time}m using {mem}Mo max",
             ['now' => date('Y-m-d H:i:s'), 'time' => $execTime, 'mem' => (memory_get_peak_usage(true)/1048576) ]
         );
     }
@@ -133,6 +133,7 @@ class Slingshot
             'type' =>  $this->migrationHash['to']['type'],
             'body' => array($this->migrationHash['to']['type'] => $newMappingPropertiesHash)
         );
+
         $responseHash = $this->ESClientTarget->indices()->putMapping($newMappingHash);
         if (!empty($responseHash['acknowledged'])) {
             $this->logger->addInfo("Mapping succesfully changed for {index}/{type}", $this->migrationHash['to']);
@@ -159,6 +160,7 @@ class Slingshot
         $bulkHash = $this->migrationHash['to'];
         $bulkAction = $this->migrationHash['bulk']['action'];
         $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
+        $batchTimings = array();
         while (true) {
             $response = $this->ESClientSource->scroll(
                 array(
@@ -180,14 +182,24 @@ class Slingshot
                 $iDoc++;
                 // Bulk index the batch size doc or the remaining doc
                 if ( !($iDoc % $bulkBatchSize) || !($totalDocNb-$iDoc)) {
-                    $this->logger->addInfo("Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
+                    $r = $this->ESClientTarget->bulk($bulkHash);
+                    $currentBatchEndTime = microtime(true);
+                    $batchesRemaining = ($totalDocNb - $iDoc) > 0 ? ($totalDocNb - $iDoc) / $bulkBatchSize : 1;
+                    $batchTimings[] = round(($currentBatchEndTime - $currentBatchStartTime), 3);
+                    $eta = array_sum($batchTimings) / count($batchTimings) * $batchesRemaining;
+                    $currentBatchStartTime = null;
+
+                    $this->logger->addInfo("Processed docs[{processedDocs}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo, ETA: {eta}s",
                         [
-                            'bulkDocNb' => (count($bulkHash['body'])/2),
-                            'mem'       => (memory_get_usage(true)/1048576)
+                            'processedDocs' => $iDoc,
+                            'bulkDocNb'     => (count($bulkHash['body'])/2),
+                            'mem'           => (memory_get_usage(true)/1048576),
+                            'eta'           => round($eta, 3)
                         ]
                     );
-                    $r = $this->ESClientTarget->bulk($bulkHash);
                     $bulkHash = $this->migrationHash['to'];
+                } elseif (is_null($currentBatchStartTime)) {
+                    $currentBatchStartTime = microtime(true);
                 }
             }
             // Get new scroll id
