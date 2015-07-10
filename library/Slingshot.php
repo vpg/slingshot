@@ -1,11 +1,16 @@
 <?php
 namespace vpg\slingshot;
 
+use Monolog\Logger;
+use Monolog\Handler\SyslogHandler;
+use Monolog\Formatter\LineFormatter;
+use Monolog\Processor\PsrLogMessageProcessor;
+
 /**
  * ES Migration tool based on Scann/Scroll + bulk
  *
  * @todo
- *  - Add log using monolog
+ *  - draft log w/ syslog
  *
  * @namespace vpg\slingshot
  */
@@ -14,8 +19,10 @@ class Slingshot
     private $ESClientSource;
     private $ESClientTarget;
     private $migrationHash;
-
     private $convertDocCallBack;
+
+    private $logger;
+    private $logLineFormat = "%channel% - %level_name%: %message%";
 
     /**
      * Instanciate the ElasticSearch Migration Service
@@ -38,6 +45,14 @@ class Slingshot
      */
     public function __construct($hostsConfHash, $migrationHash)
     {
+        // Init logger
+        $this->logger = new Logger('slingshot');
+        $syslogH = new SyslogHandler(null, 'local6');
+        $formatter = new LineFormatter($this->logLineFormat);
+        $syslogH->setFormatter($formatter);
+        $this->logger->pushHandler($syslogH);
+        $this->logger->pushProcessor(new PsrLogMessageProcessor);
+
         if (!$this->isMigrationConfValid($migrationHash)) {
             throw new \Exception('Wrong migrationHash paramater');
         }
@@ -46,9 +61,11 @@ class Slingshot
         }
         $this->migrationHash = $migrationHash;
         $this->ESClientSource = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['from']]]);
-        $this->ESClientTarget = &$this->ESClientSource;
         if ( !empty($hostsConfHash['to']) &&  $hostsConfHash['from'] != $hostsConfHash['to']) {
             $this->ESClientTarget = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['to']]]);
+        }
+        else {
+            $this->ESClientTarget = &$this->ESClientSource;
         }
     }
 
@@ -67,6 +84,8 @@ class Slingshot
      */
     public function migrate(array $searchQueryHash = [], $convertDocCallBack = null)
     {
+        $startsAt = microtime(true);
+        $this->logger->addInfo("Migration starts at {now}", ['now' => date('Y-m-d H:i:s')]);
         $this->searchQueryHash = $searchQueryHash;
         if (!is_callable($convertDocCallBack)) {
             throw new \Exception('Wrong callback function');
@@ -74,6 +93,12 @@ class Slingshot
         $this->convertDocCallBack = $convertDocCallBack;
         $this->processMappingChanges();
         $this->processDocumentsMigration();
+        // Stats
+        $endsAt = microtime(true);
+        $execTime = round(($endsAt - $startsAt)/60,3);
+        $this->logger->addInfo("Migration ends at {now} in {time}m using {mem}Mo max",
+            ['now' => date('Y-m-d H:i:s'), 'time' => $execTime, 'mem' => (memory_get_peak_usage(true)/1048576) ]
+        );
     }
 
     /**
@@ -84,6 +109,7 @@ class Slingshot
     private function processMappingChanges()
     {
         if (empty($this->migrationHash['mappings']) || !is_array($this->migrationHash['mappings'])) {
+            $this->logger->addInfo("No Mapping changes requiered for {index}/{type}", $this->migrationHash['to']);
             return false;
         }
         // fetch current mapping for FROM index/type
@@ -107,9 +133,10 @@ class Slingshot
             'type' =>  $this->migrationHash['to']['type'],
             'body' => array($this->migrationHash['to']['type'] => $newMappingPropertiesHash)
         );
+
         $responseHash = $this->ESClientTarget->indices()->putMapping($newMappingHash);
-        if(!empty($responseHash['acknowledged'])) {
-            echo sprintf("Mapping succesfully changed for %s/%s", $this->migrationHash['to']['index'], $this->migrationHash['to']['type']).PHP_EOL;
+        if (!empty($responseHash['acknowledged'])) {
+            $this->logger->addInfo("Mapping succesfully changed for {index}/{type}", $this->migrationHash['to']);
         };
     }
 
@@ -133,6 +160,7 @@ class Slingshot
         $bulkHash = $this->migrationHash['to'];
         $bulkAction = $this->migrationHash['bulk']['action'];
         $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
+        $batchTimings = array();
         while (true) {
             $response = $this->ESClientSource->scroll(
                 array(
@@ -154,9 +182,24 @@ class Slingshot
                 $iDoc++;
                 // Bulk index the batch size doc or the remaining doc
                 if ( !($iDoc % $bulkBatchSize) || !($totalDocNb-$iDoc)) {
-                    echo PHP_EOL . "Bulk " . (count($bulkHash['body'])/2) . PHP_EOL;
                     $r = $this->ESClientTarget->bulk($bulkHash);
+                    $currentBatchEndTime = microtime(true);
+                    $batchesRemaining = ($totalDocNb - $iDoc) > 0 ? ($totalDocNb - $iDoc) / $bulkBatchSize : 1;
+                    $batchTimings[] = round(($currentBatchEndTime - $currentBatchStartTime), 3);
+                    $eta = array_sum($batchTimings) / count($batchTimings) * $batchesRemaining;
+                    $currentBatchStartTime = null;
+
+                    $this->logger->addInfo("Processed docs[{processedDocs}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo, ETA: {eta}s",
+                        [
+                            'processedDocs' => $iDoc,
+                            'bulkDocNb'     => (count($bulkHash['body'])/2),
+                            'mem'           => (memory_get_usage(true)/1048576),
+                            'eta'           => round($eta, 3)
+                        ]
+                    );
                     $bulkHash = $this->migrationHash['to'];
+                } elseif (is_null($currentBatchStartTime)) {
+                    $currentBatchStartTime = microtime(true);
                 }
             }
             // Get new scroll id
