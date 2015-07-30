@@ -141,6 +141,48 @@ class Slingshot
     }
 
     /**
+    * Return all features for the source index ( mappings, aliases, settings, warmers ...)
+    *
+    * @return array
+    */
+    public function getSourceIndexFeatures()
+    {
+        $sourceIndexFeatures = $this->ESClientSource->indices()->get(
+            [
+                'index' => $this->migrationHash['from']['index']
+            ]
+        );
+
+        return $sourceIndexFeatures[$this->migrationHash['from']['index']];
+    }
+
+    /**
+     * Return all features for the source index ( mappings, aliases, settings, warmers ...)
+     *
+     * @param array $indexBody Body used when creating the index
+     *
+     * @return void
+     */
+    public function createTargetIndex($indexBody)
+    {
+        if ($this->ESClientTarget->indices()->exists(['index' => $this->migrationHash['to']['index']])) {
+            $this->logger->addInfo(
+                "Target index {targetIndex} exists already!",
+                [
+                    'targetIndex' => $this->migrationHash['to']['index']
+                ]
+            );
+            return false;
+        }
+        $this->ESClientTarget->indices()->create(['index' => $this->migrationHash['to']['index'], 'body' => $indexBody]);
+        $this->logger->addInfo(
+            "Created target index: {targetIndex} !",
+            [
+                'targetIndex' => $this->migrationHash['to']['index']
+            ]
+        );
+    }
+    /**
      * Processes the migration using scan & scroll search
      * Applies the given callback func on each document
      * Saves document by batch using bulk API
@@ -165,7 +207,7 @@ class Slingshot
             $response = $this->ESClientSource->scroll(
                 array(
                     "scroll_id" => $scrollId,
-                    "scroll" => "30s"
+                    "scroll" => "2m"
                 )
             );
             $docNb = count($response['hits']['hits']);
@@ -207,6 +249,53 @@ class Slingshot
         }
     }
 
+    /**
+    * Switches alias from Source server to Target source
+    *
+    * @param string $alias
+    *
+    * @return void
+    */
+    public function switchAlias($alias) {
+        $fromParams['body'] = array(
+            'actions' => array(
+                array(
+                    'remove' => array(
+                        'index' => $this->migrationHash['from']['index'],
+                        'alias' => $alias
+                        )
+                    )
+                )
+        );
+        $toParams['body'] = array(
+            'actions' => array(
+                array(
+                    'add' => array(
+                        'index' => $this->migrationHash['to']['index'],
+                        'alias' => $alias
+                        )
+                    )
+                )
+        );
+
+        $this->ESClientTarget->indices()->updateAliases($toParams);
+        $this->logger->addInfo(
+            " Added alias {alias} to {index} ",
+            [
+                'alias' => $alias,
+                'index' => $this->migrationHash['to']['index']
+            ]
+        );
+        $this->ESClientSource->indices()->updateAliases($fromParams);
+        $this->logger->addInfo(
+            " Removed alias {alias} from {index} ",
+            [
+                'alias' => $alias,
+                'index' => $this->migrationHash['from']['index'],
+
+            ]
+        );
+    }
 
     /**
      * Builds scann search hash using the given migrationHash and searchQueryHash
