@@ -60,6 +60,7 @@ class Slingshot
             throw new \Exception('Wrong hosts conf paramater');
         }
         $this->migrationHash = $migrationHash;
+        $this->docsProcessed = 0;
         $this->ESClientSource = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['from']]]);
         if ( !empty($hostsConfHash['to']) &&  $hostsConfHash['from'] != $hostsConfHash['to']) {
             $this->ESClientTarget = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['to']]]);
@@ -90,14 +91,26 @@ class Slingshot
         if (!is_callable($convertDocCallBack)) {
             throw new \Exception('Wrong callback function');
         }
+        if (!$this->ESClientTarget->indices()->exists(['index' => $this->migrationHash['to']['index']])) {
+            throw new \Exception('Target index does not exists! ' . $this->migrationHash['to']['index']);
+        }
         $this->convertDocCallBack = $convertDocCallBack;
         $this->processMappingChanges();
-        $this->processDocumentsMigration();
+        if ($this->migrationHash['withScroll']) {
+            $this->processDocumentsMigrationWithScrolling();
+        } else {
+            $this->processDocumentsMigration();
+        }
         // Stats
         $endsAt = microtime(true);
         $execTime = round(($endsAt - $startsAt)/60,3);
-        $this->logger->addInfo("Migration ends at {now} in {time}m using {mem}Mo max",
-            ['now' => date('Y-m-d H:i:s'), 'time' => $execTime, 'mem' => (memory_get_peak_usage(true)/1048576) ]
+        $this->logger->addInfo("Migration ends at {now} in {time}m using {mem}Mo max for batch : {batchNb}",
+            [
+                'now' => date('Y-m-d H:i:s'),
+                'time' => $execTime,
+                'mem' => (memory_get_peak_usage(true)/1048576),
+                'batchNb' => $this->migrationHash['documentsBatch']['batchNb']
+            ]
         );
     }
 
@@ -159,9 +172,6 @@ class Slingshot
     /**
      * Return all features for the source index ( mappings, aliases, settings, warmers ...)
      *
-     * @param array $indexBody Body used when creating the index
-     *
-     * @return void
      */
     public function createTargetIndex($indexBody)
     {
@@ -191,23 +201,17 @@ class Slingshot
      *
      * @return void
      */
-    private function processDocumentsMigration()
+    private function processDocumentsMigrationWithScrolling()
     {
         $scanQueryHash = $this->buildScanQueryHash();
         $searchResultHash = $this->ESClientSource->search($scanQueryHash);
-        $totalDocNb = $searchResultHash['hits']['total'];
+        $this->totalDocNb = $searchResultHash['hits']['total'];
         $scrollId = $searchResultHash['_scroll_id'];
-
-        $iDoc = 0;
-        $bulkHash = $this->migrationHash['to'];
-        $bulkAction = $this->migrationHash['bulk']['action'];
-        $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
-        $batchTimings = array();
         while (true) {
             $response = $this->ESClientSource->scroll(
                 array(
                     "scroll_id" => $scrollId,
-                    "scroll" => "2m"
+                    "scroll" => "30s"
                 )
             );
             $docNb = count($response['hits']['hits']);
@@ -215,40 +219,65 @@ class Slingshot
             if ($docNb <= 0) {
                 break;
             }
-            foreach ($response['hits']['hits'] as $hitHash) {
-                $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
-                $bulkHash['body'][] = [
-                    $bulkAction => [ '_id' => $hitHash['_id']]
-                    ];
-                $bulkHash['body'][] = $docHash;
-                $iDoc++;
-                // Bulk index the batch size doc or the remaining doc
-                if ( !($iDoc % $bulkBatchSize) || !($totalDocNb-$iDoc)) {
-                    $r = $this->ESClientTarget->bulk($bulkHash);
-                    $currentBatchEndTime = microtime(true);
-                    $batchesRemaining = ($totalDocNb - $iDoc) > 0 ? ($totalDocNb - $iDoc) / $bulkBatchSize : 1;
-                    $batchTimings[] = round(($currentBatchEndTime - $currentBatchStartTime), 3);
-                    $eta = array_sum($batchTimings) / count($batchTimings) * $batchesRemaining;
-                    $currentBatchStartTime = null;
-
-                    $this->logger->addInfo("Processed docs[{processedDocs}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo, ETA: {eta}s",
-                        [
-                            'processedDocs' => $iDoc,
-                            'bulkDocNb'     => (count($bulkHash['body'])/2),
-                            'mem'           => (memory_get_usage(true)/1048576),
-                            'eta'           => round($eta, 3)
-                        ]
-                    );
-                    $bulkHash = $this->migrationHash['to'];
-                } elseif (is_null($currentBatchStartTime)) {
-                    $currentBatchStartTime = microtime(true);
-                }
-            }
+            $this->processDocumentMigrationBatch($response);
             // Get new scroll id
             $scrollId = $response['_scroll_id'];
         }
     }
 
+    /**
+     * Processes the migration iterating through a batch of documents
+     * Applies the given callback func on each document and saves them by bulk
+     * Saves document by batch using bulk API
+     *
+     * @todo factorize
+     *
+     * @return void
+     */
+    private function processDocumentsMigration()
+    {
+        $searchHash = $this->migrationHash['from'];
+        if ($this->searchQueryHash) {
+            $searchHash['body']['query'] = $this->searchQueryHash;
+        }
+        $searchHash['body']['from'] = ($this->migrationHash['documentsBatch']['batchNb'] + 1) * $this->migrationHash['documentsBatch']['batchSize'];
+        $searchHash['body']['size'] = $this->migrationHash['documentsBatch']['batchSize'];
+        $response = $this->ESClientSource->search($searchHash);
+        $docNb =  count($response['hits']['hits']);
+        $this->totalDocNb = $docNb;
+        $this->processDocumentMigrationBatch($response);
+    }
+
+
+    private function processDocumentMigrationBatch($response)
+    {
+        $bulkHash = $this->migrationHash['to'];
+        $bulkAction = $this->migrationHash['bulk']['action'];
+        $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
+        $batchTimings = array();
+        foreach ($response['hits']['hits'] as $hitHash) {
+            $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
+            $bulkHash['body'][] = [
+                $bulkAction => [ '_id' => $hitHash['_id']]
+            ];
+            $bulkHash['body'][] = $docHash;
+            $this->docsProcessed++;
+            // Bulk index the batch size doc or the remaining doc
+            if ( !($this->docsProcessed % $bulkBatchSize) || !($this->totalDocNb - $this->docsProcessed)) {
+                $r = $this->ESClientTarget->bulk($bulkHash);
+                $this->logger->addInfo("Batch[ jobNb => {batchNb} ] Processed docs for current jobNb [{processedDocs} / {batchSize}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
+                    [
+                    'processedDocs' => $this->docsProcessed,
+                    'bulkDocNb' => (count($bulkHash['body'])/2),
+                    'mem' => (memory_get_usage(true)/1048576),
+                    'batchNb' => $this->migrationHash['documentsBatch']['batchNb'],
+                    'batchSize' => $this->migrationHash['documentsBatch']['batchSize']
+                    ]
+                );
+                $bulkHash = $this->migrationHash['to'];
+            }
+        }
+    }
     /**
     * Switches alias from Source server to Target source
     *
@@ -277,24 +306,31 @@ class Slingshot
                     )
                 )
         );
+        $targetIndicesWithAliasResponse = $this->ESClientTarget->indices()->getAlias(['index'=>'*','name' => $alias]);
+        $targetIndicesWithAlias = array_keys($targetIndicesWithAliasResponse);
+        if (!in_array($this->migrationHash['to']['index'], $targetIndicesWithAlias)) {
+            $this->ESClientTarget->indices()->updateAliases($toParams);
+            $this->logger->addInfo(
+                " Added alias {alias} to {index} ",
+                [
+                    'alias' => $alias,
+                    'index' => $this->migrationHash['to']['index']
+                ]
+            );
+        }
+        $sourceIndicesWithAliasResponse = $this->ESClientSource->indices()->getAlias(['index'=>'*','name' => $alias]);
+        $sourceIndicesWithAlias = array_keys($sourceIndicesWithAliasResponse);
+        if (in_array($this->migrationHash['from']['index'], $sourceIndicesWithAlias)) {
+            $this->ESClientSource->indices()->updateAliases($fromParams);
+            $this->logger->addInfo(
+                " Removed alias {alias} from {index} ",
+                [
+                    'alias' => $alias,
+                    'index' => $this->migrationHash['from']['index'],
 
-        $this->ESClientTarget->indices()->updateAliases($toParams);
-        $this->logger->addInfo(
-            " Added alias {alias} to {index} ",
-            [
-                'alias' => $alias,
-                'index' => $this->migrationHash['to']['index']
-            ]
-        );
-        $this->ESClientSource->indices()->updateAliases($fromParams);
-        $this->logger->addInfo(
-            " Removed alias {alias} from {index} ",
-            [
-                'alias' => $alias,
-                'index' => $this->migrationHash['from']['index'],
-
-            ]
-        );
+                ]
+            );
+        }
     }
 
     /**
@@ -306,17 +342,17 @@ class Slingshot
     private function buildScanQueryHash()
     {
         $searchBaseHash = [
-            "search_type" => "scan",
+            "search_type" => "scan"
             ];
         $searchDefaultHash = [
-            "scroll" => "30s",
-            "size" => 1000,
+            "scroll" => "30s"
             ];
         $searchHash = $searchBaseHash + $this->migrationHash['from'];
         $searchHash = array_merge($searchDefaultHash, $searchHash);
         if ($this->searchQueryHash) {
             $searchHash['body']['query'] = $this->searchQueryHash;
         }
+
         return $searchHash;
     }
 
