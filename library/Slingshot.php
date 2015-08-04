@@ -122,7 +122,7 @@ class Slingshot
     private function processMappingChanges()
     {
         if (empty($this->migrationHash['mappings']) || !is_array($this->migrationHash['mappings'])) {
-            $this->logger->addInfo("No Mapping changes requiered for {index}/{type}", $this->migrationHash['to']);
+            $this->logger->addInfo("No Mapping changes required for {index}/{type}", $this->migrationHash['to']);
             return false;
         }
         // fetch current mapping for FROM index/type
@@ -240,7 +240,7 @@ class Slingshot
         if ($this->searchQueryHash) {
             $searchHash['body']['query'] = $this->searchQueryHash;
         }
-        $searchHash['body']['from'] = ($this->migrationHash['documentsBatch']['batchNb'] + 1) * $this->migrationHash['documentsBatch']['batchSize'];
+        $searchHash['body']['from'] = $this->migrationHash['documentsBatch']['batchNb'] * $this->migrationHash['documentsBatch']['batchSize'];
         $searchHash['body']['size'] = $this->migrationHash['documentsBatch']['batchSize'];
         $response = $this->ESClientSource->search($searchHash);
         $docNb =  count($response['hits']['hits']);
@@ -263,7 +263,7 @@ class Slingshot
             $bulkHash['body'][] = $docHash;
             $this->docsProcessed++;
             // Bulk index the batch size doc or the remaining doc
-            if ( !($this->docsProcessed % $bulkBatchSize) || !($this->totalDocNb - $this->docsProcessed)) {
+            if ( !($this->docsProcessed % $bulkBatchSize) || ($this->totalDocNb - $this->docsProcessed) <= 0) {
                 $r = $this->ESClientTarget->bulk($bulkHash);
                 $this->logger->addInfo("Batch[ jobNb => {batchNb} ] Processed docs for current jobNb [{processedDocs} / {batchSize}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
                     [
