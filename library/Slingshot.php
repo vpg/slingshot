@@ -265,15 +265,24 @@ class Slingshot
             // Bulk index the batch size doc or the remaining doc
             if ( !($this->docsProcessed % $bulkBatchSize) || ($this->totalDocNb - $this->docsProcessed) <= 0) {
                 $r = $this->ESClientTarget->bulk($bulkHash);
-                $this->logger->addInfo("Batch[ jobNb => {batchNb} ] Processed docs for current jobNb [{processedDocs} / {batchSize}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
-                    [
-                    'processedDocs' => $this->docsProcessed,
-                    'bulkDocNb' => (count($bulkHash['body'])/2),
-                    'mem' => (memory_get_usage(true)/1048576),
-                    'batchNb' => $this->migrationHash['documentsBatch']['batchNb'],
-                    'batchSize' => $this->migrationHash['documentsBatch']['batchSize']
-                    ]
-                );
+                if (empty($r['error'])) {
+                    $this->logger->addInfo("Batch[ jobNb => {batchNb} ] Processed docs for current jobNb [{processedDocs} / {batchSize}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
+                        [
+                            'processedDocs' => $this->docsProcessed,
+                            'bulkDocNb' => (count($bulkHash['body'])/2),
+                            'mem' => (memory_get_usage(true)/1048576),
+                            'batchNb' => $this->migrationHash['documentsBatch']['batchNb'],
+                            'batchSize' => $this->migrationHash['documentsBatch']['batchSize']
+                        ]
+                    );
+                } else {
+                    $this->logger->addInfo("Batch[ jobNb => {batchNb} ] bulk error : {error}",
+                        [
+                            'batchNb' => $this->migrationHash['documentsBatch']['batchNb'],
+                            'error' => $r['error']
+                        ]
+                    );
+                }
                 $bulkHash = $this->migrationHash['to'];
             }
         }
