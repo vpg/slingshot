@@ -20,6 +20,7 @@ class Slingshot
     private $ESClientTarget;
     private $migrationHash;
     private $convertDocCallBack;
+    private $bulkHash;
 
     private $logger;
     private $logLineFormat = "%channel% - %level_name%: %message%";
@@ -68,6 +69,7 @@ class Slingshot
         else {
             $this->ESClientTarget = &$this->ESClientSource;
         }
+        $this->bulkHash = $this->migrationHash['to'];
     }
 
     /**
@@ -97,6 +99,7 @@ class Slingshot
         $this->convertDocCallBack = $convertDocCallBack;
         $this->processMappingChanges();
         if ($this->migrationHash['withScroll']) {
+            $this->logger->addInfo("withScroll");
             $this->processDocumentsMigrationWithScrolling();
         } else {
             $this->processDocumentsMigration();
@@ -206,8 +209,11 @@ class Slingshot
         $scanQueryHash = $this->buildScanQueryHash();
         $searchResultHash = $this->ESClientSource->search($scanQueryHash);
         $this->totalDocNb = $searchResultHash['hits']['total'];
+        $this->logger->addInfo("Documents to migrate : {nb}", ['nb' => $this->totalDocNb]);
         $scrollId = $searchResultHash['_scroll_id'];
         while (true) {
+            $this->logger->addInfo("Fetching new scroll ...");
+            $scrollStartsAt = microtime(true);
             $response = $this->ESClientSource->scroll(
                 array(
                     "scroll_id" => $scrollId,
@@ -215,6 +221,9 @@ class Slingshot
                 )
             );
             $docNb = count($response['hits']['hits']);
+            $scrollEndsAt = microtime(true);
+            $scrollExecTime = round(($scrollEndsAt - $scrollStartsAt),3);
+            $this->logger->addInfo("{nb} doc(s) fetched in {time}s", ['nb' => $docNb, 'time' => $scrollExecTime]);
             // If there is nothing to process anymore
             if ($docNb <= 0) {
                 break;
@@ -251,30 +260,29 @@ class Slingshot
 
     private function processDocumentMigrationBatch($response)
     {
-        $bulkHash = $this->migrationHash['to'];
         $bulkAction = $this->migrationHash['bulk']['action'];
         $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
         $batchTimings = array();
         foreach ($response['hits']['hits'] as $hitHash) {
             $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
-            $bulkHash['body'][] = [
+            $this->bulkHash['body'][] = [
                 $bulkAction => [ '_id' => $hitHash['_id']]
             ];
-            $bulkHash['body'][] = $docHash;
+            $this->bulkHash['body'][] = $docHash;
             $this->docsProcessed++;
             // Bulk index the batch size doc or the remaining doc
             if ( !($this->docsProcessed % $bulkBatchSize) || ($this->totalDocNb - $this->docsProcessed) <= 0) {
-                $r = $this->ESClientTarget->bulk($bulkHash);
+                $r = $this->ESClientTarget->bulk($this->bulkHash);
                 $this->logger->addInfo("Batch[ jobNb => {batchNb} ] Processed docs for current jobNb [{processedDocs} / {batchSize}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
                     [
                     'processedDocs' => $this->docsProcessed,
-                    'bulkDocNb' => (count($bulkHash['body'])/2),
+                    'bulkDocNb' => (count($this->bulkHash['body'])/2),
                     'mem' => (memory_get_usage(true)/1048576),
-                    'batchNb' => $this->migrationHash['documentsBatch']['batchNb'],
-                    'batchSize' => $this->migrationHash['documentsBatch']['batchSize']
+                    'batchNb' => $this->migrationHash['documentsBatch']['batchNb']?:1,
+                    'batchSize' => $this->migrationHash['documentsBatch']['batchSize']?:$this->totalDocNb
                     ]
                 );
-                $bulkHash = $this->migrationHash['to'];
+                $this->bulkHash = $this->migrationHash['to'];
             }
         }
     }
