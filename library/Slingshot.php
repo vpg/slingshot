@@ -112,7 +112,7 @@ class Slingshot
                 'now' => date('Y-m-d H:i:s'),
                 'time' => $execTime,
                 'mem' => (memory_get_peak_usage(true)/1048576),
-                'batchNb' => $this->migrationHash['documentsBatch']['batchNb']
+                'batchNb' => isset($this->migrationHash['documentsBatch']) ? $this->migrationHash['documentsBatch']['batchNb'] : ''
             ]
         );
     }
@@ -278,7 +278,7 @@ class Slingshot
                     'processedDocs' => $this->docsProcessed,
                     'bulkDocNb' => (count($this->bulkHash['body'])/2),
                     'mem' => (memory_get_usage(true)/1048576),
-                    'batchNb' => $this->migrationHash['documentsBatch']['batchNb']?:1,
+                    'batchNb' => $this->migrationHash['documentsBatch']['batchNb'] ? : 1,
                     'batchSize' => $this->migrationHash['documentsBatch']['batchSize']?:$this->totalDocNb
                     ]
                 );
