@@ -20,16 +20,26 @@ $esCnfHash = [
 $enrichDocCallBack = function ($docHash) {
     $saleNb = count($docHash['bus']);
     for( $saleI = 0; $saleI < $saleNb; $saleI++ ) {
-        $criteriaFiltersListHash = $docHash['bus'][$saleI]['locales'][0]['criteria_filters'];
-        foreach($criteriaFiltersListHash as $keyCriteriaFilters => $criteriaFiltersHash) {
-            // Pensions
-            if ($criteriaFiltersHash['name'] == 'c.pe') {
-                $label = $criteriaFiltersHash['code'];
-                $code = $criteriaFiltersHash['label'];
-                $docHash['bus'][$saleI]['locales'][0]['criteria_filters'][$keyCriteriaFilters]['label'] = $label;
-                $docHash['bus'][$saleI]['locales'][0]['criteria_filters'][$keyCriteriaFilters]['code'] = $code;
-            } elseif($criteriaFiltersHash['name'] == '_c.de') {
-                $docHash['bus'][$saleI]['locales'][0]['criteria_filters'][$keyCriteriaFilters]['name'] = '_c_de';
+
+        $localesListHash = $docHash['bus'][$saleI]['locales'];
+        foreach($localesListHash as $keyLocales => $localesHash) {
+            $criteriaFiltersListHash = $localesHash['criteria_filters'];
+
+            foreach($criteriaFiltersListHash as $keyCriteriaFilters => $criteriaFiltersHash)
+            {
+                // Pensions
+                if ($criteriaFiltersHash['name'] == 'c.pe')
+                {
+                    $label = $criteriaFiltersHash['code'];
+                    $code = $criteriaFiltersHash['label'];
+                    $docHash['bus'][$saleI]['locales'][$keyLocales]['criteria_filters'][$keyCriteriaFilters]['label'] = $label;
+                    $docHash['bus'][$saleI]['locales'][$keyLocales]['criteria_filters'][$keyCriteriaFilters]['code'] = $code;
+
+                }
+                elseif ($criteriaFiltersHash['name'] == '_c.de')
+                { // Destinations
+                    $docHash['bus'][$saleI]['locales'][$keyLocales]['criteria_filters'][$keyCriteriaFilters]['name'] = '_c_de';
+                }
             }
         }
     }
