@@ -2,6 +2,8 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 use \vpg\slingshot;
 
+define('TECH_HISTORY_KEY', 'tech_histo');
+
 /**
  * Elastic hosts configuration
  * Here we work on the same host
@@ -16,6 +18,7 @@ $version = [
     'label' => 'Switch criteria_filters pension code and label values, Replace criteri_filters "_c.de" key to "_c_de" (regions)'
 ];
 
+
 /**
  * Return true if the doc has already been migrated
  *
@@ -26,8 +29,8 @@ $version = [
  */
 function alreadyMigrated($docHash, $version) {
 
-    if (isset($docHash['tech'])) {
-        $techHash = $docHash['tech'];
+    if (isset($docHash[TECH_HISTORY_KEY])) {
+        $techHash = $docHash[TECH_HISTORY_KEY];
         foreach($techHash as $techValueHash) {
             if ($techValueHash['code'] == $version['code']) {
                 return true;
@@ -48,7 +51,7 @@ $enrichDocCallBack = function ($docHash) {
 
     global $version;
 
-    // If the
+    // If the doc has already been migrated we don't do anything on the doc
     if (alreadyMigrated($docHash, $version)) {
         return $docHash;
     }
@@ -80,7 +83,7 @@ $enrichDocCallBack = function ($docHash) {
     }
 
     // Update tech key in order to have history
-    $docHash['tech'][] = $version;
+    $docHash[TECH_HISTORY_KEY][] = $version;
 
     return $docHash;
 };
