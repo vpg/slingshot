@@ -11,6 +11,33 @@ $esCnfHash = [
     'to'   => 'vp-ol-provider-rec2.recette.vpg.lan:9200'
 ];
 
+$version = [
+    'code'  => 1,
+    'label' => 'Switch criteria_filters pension code and label values, Replace criteri_filters "_c.de" key to "_c_de" (regions)'
+];
+
+/**
+ * Return true if the doc has already been migrated
+ *
+ * @param $docHash Document Hash taken from ELS
+ * @param $version Version to check for the document
+ *
+ * @return bool True if the doc has already been migrated to the required version
+ */
+function alreadyMigrated($docHash, $version) {
+
+    if (isset($docHash['tech'])) {
+        $techHash = $docHash['tech'];
+        foreach($techHash as $techValueHash) {
+            if ($techValueHash['code'] == $version['code']) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+};
+
 /**
  * Replaces all docs of the given index
  * Each new doc is returned by enrichDocCallBack which :
@@ -18,6 +45,14 @@ $esCnfHash = [
  *     -  Removes 'foo' field 
  */
 $enrichDocCallBack = function ($docHash) {
+
+    global $version;
+
+    // If the
+    if (alreadyMigrated($docHash, $version)) {
+        return $docHash;
+    }
+
     $saleNb = count($docHash['bus']);
     for( $saleI = 0; $saleI < $saleNb; $saleI++ ) {
 
@@ -43,6 +78,10 @@ $enrichDocCallBack = function ($docHash) {
             }
         }
     }
+
+    // Update tech key in order to have history
+    $docHash['tech'][] = $version;
+
     return $docHash;
 };
 
