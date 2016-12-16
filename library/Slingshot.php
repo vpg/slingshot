@@ -25,6 +25,10 @@ class Slingshot
     private $logger;
     private $logLineFormat = "%channel% - %level_name%: %message%";
 
+    const VERBOSITY_DEBUG = Logger::DEBUG;
+    const VERBOSITY_INFO = Logger::INFO;
+    const VERBOSITY_ERROR = Logger::ERROR;
+
     /**
      * Instanciate the ElasticSearch Migration Service
      *
@@ -41,14 +45,14 @@ class Slingshot
      *                  'aliases' => ['read' => 'barRead', 'write' => 'barWrite'],
      *                  'mapping' => [...]
      *              ]
-     *
+     * @param integer log level Slingshot::VERBOSITY_INFO | VERBOSITY_DEBUG | VERBOSITY_ERROR
      * @return void
      */
-    public function __construct($hostsConfHash, $migrationHash)
+    public function __construct($hostsConfHash, $migrationHash, $verbosity = self::VERBOSITY_INFO)
     {
         // Init logger
         $this->logger = new Logger('slingshot');
-        $syslogH = new SyslogHandler(null, 'local6');
+        $syslogH = new SyslogHandler(null, 'local6', $verbosity);
         $formatter = new LineFormatter($this->logLineFormat);
         $syslogH->setFormatter($formatter);
         $this->logger->pushHandler($syslogH);
@@ -212,7 +216,7 @@ class Slingshot
         $this->logger->addInfo("Documents to migrate : {nb}", ['nb' => $this->totalDocNb]);
         $scrollId = $searchResultHash['_scroll_id'];
         while (true) {
-            $this->logger->addInfo("Fetching new scroll ...");
+            $this->logger->addDebug("Fetching new scroll ...");
             $scrollStartsAt = microtime(true);
             $response = $this->ESClientSource->scroll(
                 array(
@@ -223,7 +227,7 @@ class Slingshot
             $docNb = count($response['hits']['hits']);
             $scrollEndsAt = microtime(true);
             $scrollExecTime = round(($scrollEndsAt - $scrollStartsAt),3);
-            $this->logger->addInfo("{nb} doc(s) fetched in {time}s", ['nb' => $docNb, 'time' => $scrollExecTime]);
+            $this->logger->addInfo("{nb} doc(s) scroll fetched in {time}s", ['nb' => $docNb, 'time' => $scrollExecTime]);
             // If there is nothing to process anymore
             if ($docNb <= 0) {
                 break;
@@ -251,6 +255,7 @@ class Slingshot
         }
         $searchHash['body']['from'] = $this->migrationHash['documentsBatch']['batchNb'] * $this->migrationHash['documentsBatch']['batchSize'];
         $searchHash['body']['size'] = $this->migrationHash['documentsBatch']['batchSize'];
+        $this->logger->addDebug("Exec {query}", [ "query" => json_encode($searchHash)]);
         $response = $this->ESClientSource->search($searchHash);
         $docNb =  count($response['hits']['hits']);
         $this->totalDocNb = $docNb;
@@ -260,19 +265,37 @@ class Slingshot
 
     private function processDocumentMigrationBatch($response)
     {
+        $this->logger->addInfo( "Start migration of {docNb} doc at {time}", [ "docNb" => count($response['hits']['hits']) , "time" => microtime(true) ]);
         $bulkAction = $this->migrationHash['bulk']['action'];
         $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
         $batchTimings = array();
         foreach ($response['hits']['hits'] as $hitHash) {
             $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
-            $this->bulkHash['body'][] = [
-                $bulkAction => [ '_id' => $hitHash['_id']]
-            ];
-            $this->bulkHash['body'][] = $docHash;
+             //handle doc splitting
+            if ($this->shouldSplittDoc($docHash)) {
+                $this->logger->addDebug(
+                    "Split Mode : doc {id} split in {splitNb}",
+                    [ "id" => $hitHash['_id'], "splitNb" => count($docHash) ]
+                );
+                foreach ($docHash as $subDoc) {
+                    $this->bulkHash['body'][] = [
+                        $bulkAction => [ '_id' => $subDoc['id']]
+                    ];
+                    $this->bulkHash['body'][] = $subDoc;
+                }
+            }
+            else {
+                $this->bulkHash['body'][] = [
+                    $bulkAction => [ '_id' => $hitHash['_id']]
+                ];
+                $this->bulkHash['body'][] = $docHash;
+            }
             $this->docsProcessed++;
             // Bulk index the batch size doc or the remaining doc
             if ( !($this->docsProcessed % $bulkBatchSize) || ($this->totalDocNb - $this->docsProcessed) <= 0) {
+                $this->logger->addInfo("Send bulk at {time}", [ "time" => microtime(true) ]);
                 $r = $this->ESClientTarget->bulk($this->bulkHash);
+                $this->logger->addDebug( "end bulk action at {time}", [ "time" => microtime(true) ]);
                 $this->logger->addInfo("Batch[ jobNb => {batchNb} ] Processed docs for current jobNb [{processedDocs} / {batchSize}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
                     [
                     'processedDocs' => $this->docsProcessed,
@@ -396,6 +419,23 @@ class Slingshot
     {
         if ( empty($hostsConfHash['from'])) {
             return false;
+        }
+        return true;
+    }
+
+    /**
+     * Defines if the given doc is a list of doc and not a signle one
+     * Because ELS does not allow int a property
+     *
+     * @param array $docHash the doc hash given by the user callback func
+     *
+     * @return bool true if the given doc has to be processed as a list of docs
+     */
+    private function shouldSplittDoc($docHash)
+    {
+        $keyList = array_keys($docHash);
+        foreach($keyList as $key) {
+            if(!is_numeric($key)) return false;
         }
         return true;
     }
