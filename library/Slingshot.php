@@ -116,7 +116,7 @@ class Slingshot
                 'now' => date('Y-m-d H:i:s'),
                 'time' => $execTime,
                 'mem' => (memory_get_peak_usage(true)/1048576),
-                'batchNb' => isset($this->migrationHash['documentsBatch']) ? $this->migrationHash['documentsBatch']['batchNb'] : ''
+                'batchNb' => isset($this->migrationHash['documentsBatch']['batchNb']) ? $this->migrationHash['documentsBatch']['batchNb'] : ''
             ]
         );
     }
@@ -253,6 +253,7 @@ class Slingshot
         if ($this->searchQueryHash) {
             $searchHash['body']['query'] = $this->searchQueryHash;
         }
+
         $searchHash['body']['from'] = $this->migrationHash['documentsBatch']['batchNb'] * $this->migrationHash['documentsBatch']['batchSize'];
         $searchHash['body']['size'] = $this->migrationHash['documentsBatch']['batchSize'];
         $this->logger->addDebug("Exec {query}", [ "query" => json_encode($searchHash)]);
@@ -270,7 +271,12 @@ class Slingshot
         $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
         $batchTimings = array();
         foreach ($response['hits']['hits'] as $hitHash) {
-            $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source']);
+
+            $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source'], $hitHash['_id']);
+
+            // No doc, no processing
+            if (is_null($docHash)) continue;
+
              //handle doc splitting
             if ($this->shouldSplittDoc($docHash)) {
                 $this->logger->addDebug(
@@ -279,7 +285,7 @@ class Slingshot
                 );
                 foreach ($docHash as $subDoc) {
                     $this->bulkHash['body'][] = [
-                        $bulkAction => [ '_id' => $subDoc['id']]
+                        $bulkAction => [ '_id' => isset($subDoc['_id']) ? $subDoc['_id'] : $subDoc['id']]
                     ];
                     $this->bulkHash['body'][] = $subDoc;
                 }
@@ -301,8 +307,10 @@ class Slingshot
                     'processedDocs' => $this->docsProcessed,
                     'bulkDocNb' => (count($this->bulkHash['body'])/2),
                     'mem' => (memory_get_usage(true)/1048576),
-                    'batchNb' => $this->migrationHash['documentsBatch']['batchNb'] ? : 1,
-                    'batchSize' => $this->migrationHash['documentsBatch']['batchSize']?:$this->totalDocNb
+                    'batchNb' =>
+                      isset($this->migrationHash['documentsBatch']['batchNb']) ? $this->migrationHash['documentsBatch']['batchNb'] : 1,
+                    'batchSize' =>
+                      isset($this->migrationHash['documentsBatch']['batchSize']) ? $this->migrationHash['documentsBatch']['batchSize'] : $this->totalDocNb
                     ]
                 );
                 $this->bulkHash = $this->migrationHash['to'];
