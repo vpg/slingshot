@@ -93,7 +93,7 @@ class Slingshot
     {
         $startsAt = microtime(true);
         $this->logger->addInfo("Migration starts at {now}", ['now' => date('Y-m-d H:i:s')]);
-        $this->searchQueryHash = $searchQueryHash;
+        $this->searchQueryHash = isset($searchQueryHash['query']) ? $searchQueryHash : ['query' => $searchQueryHash];
         if (!is_callable($convertDocCallBack)) {
             throw new \Exception('Wrong callback function');
         }
@@ -251,14 +251,7 @@ class Slingshot
     {
         $searchHash = $this->migrationHash['from'];
         if ($this->searchQueryHash) {
-          if (!isset($this->searchQueryHash['query']))
-          {
-            $searchHash['body']['query'] = $this->searchQueryHash;
-          }
-          else
-          {
             $searchHash['body'] = $this->searchQueryHash;
-          }
         }
 
         $searchHash['body']['from'] = $this->migrationHash['documentsBatch']['batchNb'] * $this->migrationHash['documentsBatch']['batchSize'];
