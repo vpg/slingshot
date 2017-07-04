@@ -251,7 +251,14 @@ class Slingshot
     {
         $searchHash = $this->migrationHash['from'];
         if ($this->searchQueryHash) {
+          if (!isset($this->searchQueryHash['query']))
+          {
             $searchHash['body']['query'] = $this->searchQueryHash;
+          }
+          else
+          {
+            $searchHash['body'] = $this->searchQueryHash;
+          }
         }
 
         $searchHash['body']['from'] = $this->migrationHash['documentsBatch']['batchNb'] * $this->migrationHash['documentsBatch']['batchSize'];
