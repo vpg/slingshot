@@ -93,7 +93,7 @@ class Slingshot
     {
         $startsAt = microtime(true);
         $this->logger->addInfo("Migration starts at {now}", ['now' => date('Y-m-d H:i:s')]);
-        $this->searchQueryHash = isset($searchQueryHash['query']) ? $searchQueryHash : ['query' => $searchQueryHash];
+        $this->searchQueryHash = (empty($searchQueryHash) || isset($searchQueryHash['query'])) ? $searchQueryHash : ['query' => $searchQueryHash];
         if (!is_callable($convertDocCallBack)) {
             throw new \Exception('Wrong callback function');
         }
