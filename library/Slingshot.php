@@ -102,7 +102,7 @@ class Slingshot
         }
         $this->convertDocCallBack = $convertDocCallBack;
         $this->processMappingChanges();
-        if ($this->migrationHash['withScroll']) {
+        if (($this->migrationHash['withScroll']) ||  (isset($this->migrationHash['scroll']))) {
             $this->logger->addInfo("withScroll");
             $this->processDocumentsMigrationWithScrolling();
         } else {
@@ -387,7 +387,7 @@ class Slingshot
             "scroll" => "30s"
             ];
         $searchHash = $searchBaseHash + $this->migrationHash['from'];
-        $searchHash = array_merge($searchDefaultHash, $searchHash);
+        $searchHash = array_merge($searchDefaultHash, $searchHash, $this->migrationHash['scroll']);
         if ($this->searchQueryHash) {
             $searchHash['body'] = $this->searchQueryHash;
         }
