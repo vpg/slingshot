@@ -389,7 +389,7 @@ class Slingshot
         $searchHash = $searchBaseHash + $this->migrationHash['from'];
         $searchHash = array_merge($searchDefaultHash, $searchHash);
         if ($this->searchQueryHash) {
-            $searchHash['body']['query'] = $this->searchQueryHash;
+            $searchHash['body'] = $this->searchQueryHash;
         }
 
         return $searchHash;
