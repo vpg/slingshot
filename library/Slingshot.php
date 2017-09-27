@@ -387,7 +387,7 @@ class Slingshot
             "scroll" => "30s"
             ];
         $searchHash = $searchBaseHash + $this->migrationHash['from'];
-        $searchHash = array_merge($searchDefaultHash, $searchHash, $this->migrationHash['scroll']);
+        $searchHash = array_merge($searchDefaultHash, $searchHash, $this->migrationHash['scroll']?:[]);
         if ($this->searchQueryHash) {
             $searchHash['body'] = $this->searchQueryHash;
         }
