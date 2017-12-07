@@ -211,6 +211,7 @@ class Slingshot
     private function processDocumentsMigrationWithScrolling()
     {
         $scanQueryHash = $this->buildScanQueryHash();
+        $this->logger->addDebug("Scann query " . json_encode($scanQueryHash));
         $searchResultHash = $this->ESClientSource->search($scanQueryHash);
         $this->totalDocNb = $searchResultHash['hits']['total'];
         $this->logger->addInfo("Documents to migrate : {nb}", ['nb' => $this->totalDocNb]);
@@ -266,7 +267,7 @@ class Slingshot
 
     private function processDocumentMigrationBatch($response)
     {
-        $this->logger->addInfo( "Start migration of {docNb} doc at {time}", [ "docNb" => count($response['hits']['hits']) , "time" => microtime(true) ]);
+        $this->logger->addInfo( "Migration of {docNb} doc at {time}", [ "docNb" => count($response['hits']['hits']) , "time" => microtime(true) ]);
         $bulkAction = $this->migrationHash['bulk']['action'];
         $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
         $batchTimings = array();
@@ -275,10 +276,10 @@ class Slingshot
             $docHash = call_user_func($this->convertDocCallBack, $hitHash['_source'], $hitHash['_id']);
 
             // No doc, no processing
-            if (is_null($docHash)) continue;
+            if (empty($docHash) && empty($this->migrationHash['keepEmptyDoc'])) continue;
 
-             //handle doc splitting
-            if ($this->shouldSplittDoc($docHash)) {
+            //handle doc splitting
+            if (!empty($docHash) && $this->shouldSplittDoc($docHash)) {
                 $this->logger->addDebug(
                     "Split Mode : doc {id} split in {splitNb}",
                     [ "id" => $hitHash['_id'], "splitNb" => count($docHash) ]
@@ -299,9 +300,12 @@ class Slingshot
             $this->docsProcessed++;
             // Bulk index the batch size doc or the remaining doc
             if ( !($this->docsProcessed % $bulkBatchSize) || ($this->totalDocNb - $this->docsProcessed) <= 0) {
-                $this->logger->addInfo("Send bulk at {time}", [ "time" => microtime(true) ]);
+                $this->logger->addDebug("Send bulk of $bulkBatchSize docs");
+                $bulkStartsAt = microtime(true);
                 $r = $this->ESClientTarget->bulk($this->bulkHash);
-                $this->logger->addDebug( "end bulk action at {time}", [ "time" => microtime(true) ]);
+                $bulkEndsAt = microtime(true);
+                $bulkExecTime = round(($bulkEndsAt - $bulkStartsAt),3);
+                $this->logger->addDebug( "Bulk action processed in {time}", [ "time" => $bulkExecTime ]);
                 $this->logger->addInfo("Batch[ jobNb => {batchNb} ] Processed docs for current jobNb [{processedDocs} / {batchSize}] - Bulk op for {bulkDocNb}doc(s) - Memory usage {mem}Mo",
                     [
                     'processedDocs' => $this->docsProcessed,
@@ -387,11 +391,10 @@ class Slingshot
             "scroll" => "30s"
             ];
         $searchHash = $searchBaseHash + $this->migrationHash['from'];
-        $searchHash = array_merge($searchDefaultHash, $searchHash, $this->migrationHash['scroll']?:[]);
+        $searchHash = array_merge($searchDefaultHash, $searchHash, $this->migrationHash['scroll']);
         if ($this->searchQueryHash) {
             $searchHash['body'] = $this->searchQueryHash;
         }
-
         return $searchHash;
     }
 
