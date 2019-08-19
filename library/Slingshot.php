@@ -1,10 +1,12 @@
 <?php
 namespace vpg\slingshot;
 
-use Monolog\Logger;
-use Monolog\Handler\SyslogHandler;
-use Monolog\Formatter\LineFormatter;
-use Monolog\Processor\PsrLogMessageProcessor;
+use \Exception;
+use \Monolog\Logger;
+use \Monolog\Handler\SyslogHandler;
+use \Monolog\Formatter\LineFormatter;
+use \Monolog\Processor\PsrLogMessageProcessor;
+use \Vpg\Elasticsearch\ClientBuilder;
 
 /**
  * ES Migration tool based on Scann/Scroll + bulk
@@ -47,6 +49,7 @@ class Slingshot
      *              ]
      * @param integer log level Slingshot::VERBOSITY_INFO | VERBOSITY_DEBUG | VERBOSITY_ERROR
      * @return void
+     * @throws Exception
      */
     public function __construct($hostsConfHash, $migrationHash, $verbosity = self::VERBOSITY_INFO)
     {
@@ -59,16 +62,20 @@ class Slingshot
         $this->logger->pushProcessor(new PsrLogMessageProcessor);
 
         if (!$this->isMigrationConfValid($migrationHash)) {
-            throw new \Exception('Wrong migrationHash paramater');
+            throw new Exception('Wrong migrationHash paramater');
         }
         if (!$this->isHostsConfValid($hostsConfHash)) {
-            throw new \Exception('Wrong hosts conf paramater');
+            throw new Exception('Wrong hosts conf paramater');
         }
         $this->migrationHash = $migrationHash;
         $this->docsProcessed = 0;
-        $this->ESClientSource = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['from']]]);
+        $this->ESClientSource = ClientBuilder::create()
+            ->setHosts([$hostsConfHash['from']])
+            ->build();
         if ( !empty($hostsConfHash['to']) &&  $hostsConfHash['from'] != $hostsConfHash['to']) {
-            $this->ESClientTarget = new \Elasticsearch\Client(['hosts' => [$hostsConfHash['to']]]);
+            $this->ESClientTarget = ClientBuilder::create()
+                ->setHosts([$hostsConfHash['to']])
+                ->build();
         }
         else {
             $this->ESClientTarget = &$this->ESClientSource;
@@ -95,10 +102,10 @@ class Slingshot
         $this->logger->addInfo("Migration starts at {now}", ['now' => date('Y-m-d H:i:s')]);
         $this->searchQueryHash = (empty($searchQueryHash) || isset($searchQueryHash['query'])) ? $searchQueryHash : ['query' => $searchQueryHash];
         if (!is_callable($convertDocCallBack)) {
-            throw new \Exception('Wrong callback function');
+            throw new Exception('Wrong callback function');
         }
         if (!$this->ESClientTarget->indices()->exists(['index' => $this->migrationHash['to']['index']])) {
-            throw new \Exception('Target index does not exists! ' . $this->migrationHash['to']['index']);
+            throw new Exception('Target index does not exists! ' . $this->migrationHash['to']['index']);
         }
         $this->convertDocCallBack = $convertDocCallBack;
         $this->processMappingChanges();
