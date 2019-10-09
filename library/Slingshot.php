@@ -3,7 +3,7 @@ namespace vpg\slingshot;
 
 use \Exception;
 use \Phalcon\Logger;
-use \Vpg\Elasticsearch\ClientBuilder;
+use \Elasticsearch\ClientBuilder;
 
 /**
  * ES Migration tool based on Scann/Scroll + bulk
