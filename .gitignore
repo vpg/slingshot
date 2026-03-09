@@ -1,6 +1,9 @@
 #Composer lock file
 composer.lock
 
+# PHPUnit coverage
+coverage.xml
+
 #Third parties librairies
 vendor/
 
