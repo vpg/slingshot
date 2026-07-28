@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../vendor/autoload.php';
+use Psr\Log\NullLogger;
 use \vpg\slingshot;
 
 define('TECH_HISTORY_KEY', 'tech_histo');
@@ -104,5 +105,5 @@ $migrationConfHash = [
 $queryHash = [];
 
 // Run the migration
-$slingshot = new slingshot\Slingshot($esCnfHash, $migrationConfHash);
+$slingshot = new slingshot\Slingshot($esCnfHash, $migrationConfHash, new NullLogger());
 $slingshot->migrate($queryHash, $enrichDocCallBack);
