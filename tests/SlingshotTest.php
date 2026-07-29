@@ -12,7 +12,7 @@ use vpg\slingshot\Slingshot;
 class SlingshotTest extends PHPUnit_Framework_TestCase
 {
     /**
-     * @return Slingshot instance created without calling constructor (no ES/Phalcon deps)
+     * @return Slingshot instance created without calling constructor (no ES dependency)
      */
     private function createSlingshotWithoutConstructor()
     {
@@ -136,5 +136,74 @@ class SlingshotTest extends PHPUnit_Framework_TestCase
                 'to'   => ['index' => 'ti', 'type' => 't'],
             ]
         );
+    }
+
+    public function testUsesThePhalconDiLogger()
+    {
+        $logger = new RecordingLogger();
+        $slingshot = new Slingshot(
+            ['from' => 'localhost:9200'],
+            [
+                'from' => ['index' => 'fi', 'type' => 't'],
+                'to'   => ['index' => 'ti', 'type' => 't'],
+            ]
+        );
+
+        if (class_exists('Phalcon\Di')) {
+            $di = new \Phalcon\Di();
+            $di->set('logger', $logger, true);
+        } else {
+            $di = new LoggerContainer($logger);
+        }
+        $slingshot->setDI($di);
+
+        $this->assertMigrationStartLogged($slingshot, $logger);
+    }
+
+    private function assertMigrationStartLogged(Slingshot $slingshot, RecordingLogger $logger)
+    {
+        try {
+            $slingshot->migrate();
+            $this->fail('Expected an exception for the missing callback');
+        } catch (\Exception $exception) {
+            $this->assertSame('Wrong callback function', $exception->getMessage());
+        }
+
+        $this->assertCount(1, $logger->records);
+        $this->assertSame('info', $logger->records[0]['level']);
+        $this->assertSame(0, strpos($logger->records[0]['message'], 'Migration starts at '));
+    }
+}
+
+class RecordingLogger
+{
+    public $records = [];
+
+    public function info($message, array $context = [])
+    {
+        $this->records[] = [
+            'level' => 'info',
+            'message' => $message,
+            'context' => $context,
+        ];
+    }
+}
+
+class LoggerContainer
+{
+    private $logger;
+
+    public function __construct($logger)
+    {
+        $this->logger = $logger;
+    }
+
+    public function get($service)
+    {
+        if ($service !== 'logger') {
+            throw new \RuntimeException('Unexpected service: ' . $service);
+        }
+
+        return $this->logger;
     }
 }

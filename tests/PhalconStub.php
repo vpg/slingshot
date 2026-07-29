@@ -1,19 +1,25 @@
 <?php
 /**
- * Minimal stubs for Phalcon classes when the extension is not installed (e.g. in CI).
- * Used only so that Slingshot can be loaded and tested without the real Phalcon extension.
+ * Minimal Phalcon DI stub for environments without the extension.
  */
-namespace Phalcon\Di {
-    class Injectable
-    {
-        public $logger;
-    }
-}
+namespace Phalcon\Di;
 
-namespace Phalcon\Logger {
-    class Logger
+class Injectable
+{
+    private $di;
+
+    public function setDI($di)
     {
-        public function info($msg) {}
-        public function debug($msg) {}
+        $this->di = $di;
+    }
+
+    public function getDI()
+    {
+        return $this->di;
+    }
+
+    public function __get($service)
+    {
+        return $this->di->get($service);
     }
 }
