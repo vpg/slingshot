@@ -14,7 +14,6 @@ E.g. if database connections is required for fetch additional data from producti
  * Use it in a batch
 
 ```PHP
-use Psr\Log\NullLogger;
 use \vpg\slingshot;
 
 /**
@@ -48,16 +47,7 @@ $migrationConfHash = [
     'bulk' => ['action' => 'index', 'batchSize' => 3]
 ];
 
-// Host applications should provide their PSR-3 logger explicitly.
-// NullLogger is only used here because this example is standalone.
-$logger = new NullLogger();
-
 // Run the migration
-$slingshot = new slingshot\Slingshot($esCnfHash, $migrationConfHash, $logger);
+$slingshot = new slingshot\Slingshot($esCnfHash, $migrationConfHash);
 $slingshot->migrate($queryHash = [], $enrichDocCallBack);
 ```
-
-Existing Phalcon integrations can temporarily omit the third argument. In that
-case Slingshot falls back to the `logger` service from `Phalcon\Di\Injectable`.
-This fallback is kept for backwards compatibility and will be removed in the
-next major version.

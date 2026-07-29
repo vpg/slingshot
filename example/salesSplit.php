@@ -1,6 +1,5 @@
 <?php
 require_once __DIR__ . '/vendor/autoload.php';
-use Psr\Log\NullLogger;
 use \vpg\slingshot;
 
 /**
@@ -63,5 +62,5 @@ $migrationConfHash = [
 $queryHash = [];
 
 // Run the migration
-$slingshot = new slingshot\Slingshot($esCnfHash, $migrationConfHash, new NullLogger());
+$slingshot = new slingshot\Slingshot($esCnfHash, $migrationConfHash, slingshot\Slingshot::VERBOSITY_DEBUG);
 $slingshot->migrate($queryHash, $enrichDocCallBack);

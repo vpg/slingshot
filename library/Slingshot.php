@@ -2,11 +2,14 @@
 namespace vpg\slingshot;
 
 use \Exception;
+use \Phalcon\Logger;
 use \Elasticsearch\ClientBuilder;
-use \Psr\Log\LoggerInterface;
 
 /**
  * ES Migration tool based on Scann/Scroll + bulk
+ *
+ * @todo
+ *  - draft log w/ syslog
  *
  * @namespace vpg\slingshot
  */
@@ -17,7 +20,6 @@ class Slingshot extends \Phalcon\Di\Injectable
     private $migrationHash;
     private $convertDocCallBack;
     private $bulkHash;
-    private $hostLogger;
 
     /**
      * Instanciate the ElasticSearch Migration Service
@@ -35,16 +37,11 @@ class Slingshot extends \Phalcon\Di\Injectable
      *                  'aliases' => ['read' => 'barRead', 'write' => 'barWrite'],
      *                  'mapping' => [...]
      *              ]
-     * @param LoggerInterface|null $logger Logger configured by the host application.
-     *                                     Falls back to the Phalcon DI logger for compatibility.
-     *
      * @return void
      * @throws Exception
      */
-    public function __construct($hostsConfHash, $migrationHash, LoggerInterface $logger = null)
+    public function __construct($hostsConfHash, $migrationHash)
     {
-        $this->hostLogger = $logger;
-
         if (!$this->isMigrationConfValid($migrationHash)) {
             throw new Exception('Wrong migrationHash paramater');
         }
@@ -68,20 +65,6 @@ class Slingshot extends \Phalcon\Di\Injectable
     }
 
     /**
-     * Returns the explicitly injected logger or the legacy Phalcon DI service.
-     *
-     * @return LoggerInterface|object
-     */
-    private function getLogger()
-    {
-        if ($this->hostLogger !== null) {
-            return $this->hostLogger;
-        }
-
-        return $this->logger;
-    }
-
-    /**
      * Migrates the documents matching the given $searchQueryHash query to the new index.
      * Apply for each doc the callback func $convertDocCallBack which returns the doc to index.
      *
@@ -97,7 +80,7 @@ class Slingshot extends \Phalcon\Di\Injectable
     public function migrate(array $searchQueryHash = [], $convertDocCallBack = null)
     {
         $startsAt = microtime(true);
-        $this->getLogger()->info("Migration starts at " . date('Y-m-d H:i:s'));
+        $this->logger->info("Migration starts at " . date('Y-m-d H:i:s'));
         $this->searchQueryHash = (empty($searchQueryHash) || isset($searchQueryHash['query'])) ? $searchQueryHash : ['query' => $searchQueryHash];
         if (!is_callable($convertDocCallBack)) {
             throw new Exception('Wrong callback function');
@@ -108,7 +91,7 @@ class Slingshot extends \Phalcon\Di\Injectable
         $this->convertDocCallBack = $convertDocCallBack;
         $this->processMappingChanges();
         if (($this->migrationHash['withScroll']) ||  (isset($this->migrationHash['scroll']))) {
-            $this->getLogger()->info("withScroll");
+            $this->logger->info("withScroll");
             $this->processDocumentsMigrationWithScrolling();
         } else {
             $this->processDocumentsMigration();
@@ -116,7 +99,7 @@ class Slingshot extends \Phalcon\Di\Injectable
         // Stats
         $endsAt = microtime(true);
         $execTime = round(($endsAt - $startsAt)/60,3);
-        $this->getLogger()->info(
+        $this->logger->info(
             "Migration ends at " . date('Y-m-d H:i:s') .
             " in " . $execTime . "m using " . (memory_get_peak_usage(true)/1048576) . "Mo max for batch : " .
             (isset($this->migrationHash['documentsBatch']['batchNb']) ? $this->migrationHash['documentsBatch']['batchNb'] : '')
@@ -131,7 +114,7 @@ class Slingshot extends \Phalcon\Di\Injectable
     private function processMappingChanges()
     {
         if (empty($this->migrationHash['mappings']) || !is_array($this->migrationHash['mappings'])) {
-            $this->getLogger()->info("No Mapping changes required for " . $this->migrationHash['to']['index'] . "/" . $this->migrationHash['to']['type']);
+            $this->logger->info("No Mapping changes required for " . $this->migrationHash['to']['index'] . "/" . $this->migrationHash['to']['type']);
             return false;
         }
         // fetch current mapping for FROM index/type
@@ -158,7 +141,7 @@ class Slingshot extends \Phalcon\Di\Injectable
 
         $responseHash = $this->ESClientTarget->indices()->putMapping($newMappingHash);
         if (!empty($responseHash['acknowledged'])) {
-            $this->getLogger()->info("Mapping succesfully changed for " . $this->migrationHash['to']['index'] . "/" . $this->migrationHash['to']['type']);
+            $this->logger->info("Mapping succesfully changed for " . $this->migrationHash['to']['index'] . "/" . $this->migrationHash['to']['type']);
         };
     }
 
@@ -185,12 +168,12 @@ class Slingshot extends \Phalcon\Di\Injectable
     public function createTargetIndex($indexBody)
     {
         if ($this->ESClientTarget->indices()->exists(['index' => $this->migrationHash['to']['index']])) {
-            $this->getLogger()->info(
+            $this->logger->info(
                 "Target index " . $this->migrationHash['to']['index'] . " exists already!");
             return false;
         }
         $this->ESClientTarget->indices()->create(['index' => $this->migrationHash['to']['index'], 'body' => $indexBody]);
-        $this->getLogger()->info(
+        $this->logger->info(
             "Created target index: " . $this->migrationHash['to']['index'] . " !");
     }
     /**
@@ -205,13 +188,13 @@ class Slingshot extends \Phalcon\Di\Injectable
     private function processDocumentsMigrationWithScrolling()
     {
         $scanQueryHash = $this->buildScanQueryHash();
-        $this->getLogger()->debug("Scann query " . json_encode($scanQueryHash));
+        $this->logger->debug("Scann query " . json_encode($scanQueryHash));
         $searchResultHash = $this->ESClientSource->search($scanQueryHash);
         $this->totalDocNb = $searchResultHash['hits']['total'];
-        $this->getLogger()->info("Documents to migrate : " . $this->totalDocNb);
+        $this->logger->info("Documents to migrate : " . $this->totalDocNb);
         $scrollId = $searchResultHash['_scroll_id'];
         while (true) {
-            $this->getLogger()->debug("Fetching new scroll ...");
+            $this->logger->debug("Fetching new scroll ...");
             $scrollStartsAt = microtime(true);
             $response = $this->ESClientSource->scroll(
                 array(
@@ -222,7 +205,7 @@ class Slingshot extends \Phalcon\Di\Injectable
             $docNb = count($response['hits']['hits']);
             $scrollEndsAt = microtime(true);
             $scrollExecTime = round(($scrollEndsAt - $scrollStartsAt),3);
-            $this->getLogger()->info("$docNb doc(s) scroll fetched in " . $scrollExecTime . "s");
+            $this->logger->info("$docNb doc(s) scroll fetched in " . $scrollExecTime . "s");
             // If there is nothing to process anymore
             if ($docNb <= 0) {
                 break;
@@ -251,7 +234,7 @@ class Slingshot extends \Phalcon\Di\Injectable
 
         $searchHash['body']['from'] = $this->migrationHash['documentsBatch']['batchNb'] * $this->migrationHash['documentsBatch']['batchSize'];
         $searchHash['body']['size'] = $this->migrationHash['documentsBatch']['batchSize'];
-        $this->getLogger()->debug("Exec " . json_encode($searchHash));
+        $this->logger->debug("Exec " . json_encode($searchHash));
         $response = $this->ESClientSource->search($searchHash);
         $docNb =  count($response['hits']['hits']);
         $this->totalDocNb = $docNb;
@@ -261,7 +244,7 @@ class Slingshot extends \Phalcon\Di\Injectable
 
     private function processDocumentMigrationBatch($response)
     {
-        $this->getLogger()->info( "Migration of " . count($response['hits']['hits']) . " doc at " . microtime(true));
+        $this->logger->info( "Migration of " . count($response['hits']['hits']) . " doc at " . microtime(true));
         $bulkAction = $this->migrationHash['bulk']['action'];
         $bulkBatchSize = $this->migrationHash['bulk']['batchSize'];
         $batchTimings = array();
@@ -275,7 +258,7 @@ class Slingshot extends \Phalcon\Di\Injectable
 
             //handle doc splitting
             if (!empty($docHash) && $this->shouldSplittDoc($docHash)) {
-                $this->getLogger()->debug("Split Mode : doc " . $hitHash['_id'] . " split in " . count($docHash));
+                $this->logger->debug("Split Mode : doc " . $hitHash['_id'] . " split in " . count($docHash));
                 foreach ($docHash as $subDoc) {
                     $this->bulkHash['body'][] = [
                         $bulkAction => [ '_id' => isset($subDoc['_id']) ? $subDoc['_id'] : $subDoc['id']]
@@ -292,13 +275,13 @@ class Slingshot extends \Phalcon\Di\Injectable
             $this->docsProcessed++;
             // Bulk index the batch size doc or the remaining doc
             if ( !($this->docsProcessed % $bulkBatchSize) || ($this->totalDocNb - $this->docsProcessed) <= 0) {
-                $this->getLogger()->debug("Send bulk of $bulkBatchSize docs");
+                $this->logger->debug("Send bulk of $bulkBatchSize docs");
                 $bulkStartsAt = microtime(true);
                 $r = $this->ESClientTarget->bulk($this->bulkHash);
                 $bulkEndsAt = microtime(true);
                 $bulkExecTime = round(($bulkEndsAt - $bulkStartsAt),3);
-                $this->getLogger()->debug( "Bulk action processed in $bulkExecTime");
-                $this->getLogger()->info(
+                $this->logger->debug( "Bulk action processed in $bulkExecTime");
+                $this->logger->info(
                     "Batch[ jobNb => " .
                     (isset($this->migrationHash['documentsBatch']['batchNb']) ? $this->migrationHash['documentsBatch']['batchNb'] : 1) .
                     " ] Processed docs for current jobNb [" . $this->docsProcessed . " / " .
@@ -342,14 +325,14 @@ class Slingshot extends \Phalcon\Di\Injectable
         $targetIndicesWithAlias = array_keys($targetIndicesWithAliasResponse);
         if (!in_array($this->migrationHash['to']['index'], $targetIndicesWithAlias)) {
             $this->ESClientTarget->indices()->updateAliases($toParams);
-            $this->getLogger()->info(
+            $this->logger->info(
                 " Added alias $alias to " . $this->migrationHash['to']['index']);
         }
         $sourceIndicesWithAliasResponse = $this->ESClientSource->indices()->getAlias(['index'=>'*','name' => $alias]);
         $sourceIndicesWithAlias = array_keys($sourceIndicesWithAliasResponse);
         if (in_array($this->migrationHash['from']['index'], $sourceIndicesWithAlias)) {
             $this->ESClientSource->indices()->updateAliases($fromParams);
-            $this->getLogger()->info(
+            $this->logger->info(
                 " Removed alias $alias from " . $this->migrationHash['from']['index']);
         }
     }

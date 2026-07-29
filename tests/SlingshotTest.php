@@ -2,7 +2,6 @@
 namespace vpg\slingshot\Tests;
 
 use PHPUnit_Framework_TestCase;
-use Psr\Log\AbstractLogger;
 use ReflectionClass;
 use ReflectionMethod;
 use vpg\slingshot\Slingshot;
@@ -139,22 +138,7 @@ class SlingshotTest extends PHPUnit_Framework_TestCase
         );
     }
 
-    public function testUsesTheLoggerProvidedByTheHost()
-    {
-        $logger = new RecordingLogger();
-        $slingshot = new Slingshot(
-            ['from' => 'localhost:9200'],
-            [
-                'from' => ['index' => 'fi', 'type' => 't'],
-                'to'   => ['index' => 'ti', 'type' => 't'],
-            ],
-            $logger
-        );
-
-        $this->assertMigrationStartLogged($slingshot, $logger);
-    }
-
-    public function testFallsBackToThePhalconDiLogger()
+    public function testUsesThePhalconDiLogger()
     {
         $logger = new RecordingLogger();
         $slingshot = new Slingshot(
@@ -191,14 +175,14 @@ class SlingshotTest extends PHPUnit_Framework_TestCase
     }
 }
 
-class RecordingLogger extends AbstractLogger
+class RecordingLogger
 {
     public $records = [];
 
-    public function log($level, $message, array $context = [])
+    public function info($message, array $context = [])
     {
         $this->records[] = [
-            'level' => $level,
+            'level' => 'info',
             'message' => $message,
             'context' => $context,
         ];
