@@ -14,6 +14,7 @@
         "monolog/monolog" : "~1.4"
     },
     "require-dev": {
+        "phalcon/ide-stubs": "3.4.3",
         "phpunit/phpunit": "4.0.*"
     },
     "autoload": {

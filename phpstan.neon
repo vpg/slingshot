@@ -1,0 +1,21 @@
+# PHPStan, run by the phpstan job of the php-services CI template, on merge requests and branch pushes (blocking)
+# and in the nightly Sonar analysis.
+# phpstan-baseline.neon lists the errors already in the code: only new errors
+# fail the job. A fixed error needs no baseline change; regenerate the baseline
+# (phpstan analyse --generate-baseline phpstan-baseline.neon) to drop fixed
+# entries, and raise the level once it is small.
+includes:
+    - phpstan-baseline.neon
+
+parameters:
+    # Lowest version PHPStan 2 accepts. Production runs PHP 7.0: php -l and
+    # PHPCompatibility check that version.
+    phpVersion: 70100
+    level: 0
+    paths:
+        - library
+    # Phalcon is a C extension: its signatures come from phalcon/ide-stubs (dev dependency, installed by the phpstan job).
+    scanDirectories:
+        - vendor/phalcon/ide-stubs/src
+    # Baseline entries that no longer match (code fixed since) are not errors.
+    reportUnmatchedIgnoredErrors: false
