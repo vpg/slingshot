@@ -2,4 +2,4 @@
 include:
   - project: 'vpg-common/pipelines/php-services'
     file : '/pipeline.gitlab-ci.yml'
-    ref: main
+    ref: feat/SHOP-2144-phpstan-dev-stubs
